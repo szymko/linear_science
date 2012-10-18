@@ -44,9 +44,9 @@ static void free_parameters
 }
 
 static void set_param_weights
-(struct parameter * param, VALUE rb_weigths) {
+(struct parameter * param, VALUE rb_weights) {
 	VALUE rb_weight_labels = rb_funcall(rb_weights, rb_intern("keys"), 0);
-	VALUE rb_weight_values = rb_funcall(rb_weights, rb_intern("vaules"),0);
+	VALUE rb_weight_values = rb_funcall(rb_weights, rb_intern("vaules"), 0);
 	long i;
 
 	param->nr_weight = RHASH_SIZE(rb_weights);
@@ -57,54 +57,92 @@ static void set_param_weights
 		return;
 	}
 
-	for(i = 0; i < param->nr_weight, i++) {
-		param->weight_label[i] = rb_ary_entry(rb_weight_labels, i);
-		param->weight[i] = rb_ary_entry(rb_weight_values, i);
-	}
-} 
-
-static void assign_param_value 
-(struct parameter * param, VALUE rb_param_key, VALUE rb_param_value) {
-	switch(StringValueCStr(rb_param_key) {
-		case "kernel":
-			param->solver_type = FIX2INT(rb_param_value);
-			break;
-		case "c_cost":
-			param->C = FIX2INT(rb_param_value);
-			break;
-		case "p_epsilon":
-			param->p = FIX2INT(rb_param_value);
-			break;
-		case "e_epsilon":
-			param->eps = FIX2INT(rb_param_value);
-			break;
-		case "weights"
-			set_param_weights(param, rb_param_value);
-			break;
-		default:
-			break;
+	for(i = 0; i < param->nr_weight; i++) {
+		param->weight_label[i] = NUM2INT(rb_ary_entry(rb_weight_labels, i));
+		param->weight[i] = NUM2DBL(rb_ary_entry(rb_weight_values, i));
 	}
 }
 
+static struct problem * alloc_problem
+(struct problem * c_problem) {
+	c_problem = MALLOC(struct problem, 1);
+	return c_problem;
+}
 
-static struct parameter * read_parameters
-(VALUE self, VALUE some_hash) {
-	struct parameter * params;
-	const char * param_keys[] = 
-		{"kernel", "c_cost", "p_epsilon", "e_epsilon", "bias", "n_fold_cv", "weights"};
+static void free_problem
+(struct problem * c_problem) {
 	int i;
 
-	params = alloc_parameter(params);
+	free(c_problem->y);
+	for(i = 0; i < c_problem->l; i++) {
+		free(c_problem->x[i]);
+	}
+	free(c_problem->x);
+}
 
-	for (i = 0; i < 7; i++) {
-		VALUE hash_value = rb_hash_aref(some_hash, rb_str_new2(c_params[i]));
-		if (!NIL_P(hash_value)) {
-			rb_funcall(rb_cObject, id_puts, 1, rb_str_new2(c_params[i]));
-			rb_funcall(rb_cObject, id_puts, 1, hash_value);
+static void read_rb_examples(struct problem * c_problem, VALUE rb_example_ary, double c_bias) {
+	int i, j;
+	int current_length;
+	int len_with_bias;
+	VALUE rb_example_labels;
+	VALUE rb_example_values;
+
+	for(i = 0; i < c_problem->l; i++) {
+		current_length = RHASH_SIZE(rb_ary_entry(rb_example_ary, 1));
+		len_with_bias = c_bias > 0.0 ? ++current_length : current_length;
+		rb_example_labels = rb_funcall(rb_ary_entry(rb_example_ary, 1), rb_intern("keys"), 0);
+		rb_example_values = rb_funcall(rb_ary_entry(rb_example_ary, 1), rb_intern("values"), 0);
+
+		c_problem->x[i] = MALLOC(struct feature_node, len_with_bias);
+		c_problem->y[i] = NUM2DBL(rb_ary_entry(rb_example_ary, 0));
+
+		for(j = 0; j < current_length; j++) {
+			c_problem->x[i][j].index = NUM2INT(rb_ary_entry(rb_example_labels, j));
+			c_problem->x[i][j].value = NUM2DBL(rb_ary_entry(rb_example_values,j));
+		}
+
+		if(c_bias > 0) {
+			c_problem->x[i][len_with_bias - 1].index = -1;
+			c_problem->x[i][len_with_bias - 1].value = c_bias;
 		}
 	}
+}
 
-	return params;
+static void read_problem
+(struct problem * c_problem, VALUE rb_dataset, double c_bias) {
+	c_problem->l = RARRAY_LEN(rb_dataset); // l -> number of examples
+	c_problem->n = NUM2INT(rb_funcall(rb_dataset, rb_intern("max_dimension"),0));
+	// n -> maximum dimension of feature space
+	c_problem->bias = c_bias;
+	c_problem->x = MALLOC(struct feature_node *, c_problem->l);
+	c_problem->y = MALLOC(double, c_problem->l);
+
+	read_rb_examples(c_problem, rb_iv_get(rb_dataset, "@examples"), c_bias);	
+}
+
+static void assign_param_value 
+(struct parameter * param, VALUE rb_param_key, VALUE rb_param_value) {
+	if(StringValueCStr(rb_param_key) == "kernel")
+		param->solver_type = NUM2INT(rb_param_value);
+	else if(StringValueCStr(rb_param_key) == "c_cost")
+		param->C = NUM2DBL(rb_param_value);
+	else if(StringValueCStr(rb_param_key) == "p_epsilon")
+		param->p = NUM2DBL(rb_param_value);
+	else if(StringValueCStr(rb_param_key) == "e_epsilon")
+		param->eps = NUM2DBL(rb_param_value);
+	else if(StringValueCStr(rb_param_key) == "weights")
+		set_param_weights(param, rb_param_value);
+}
+
+
+static void read_parameters
+(struct parameter * param, VALUE rb_param_hash) {
+	VALUE rb_param_keys = rb_funcall(rb_param_hash, rb_intern("keys"), 0);
+	VALUE rb_param_values = rb_funcall(rb_param_hash, rb_intern("values"), 0);
+	int i;
+
+	for(i = 0; i < RHASH_SIZE(rb_param_hash); i++)
+		assign_param_value(param, rb_ary_entry(rb_param_keys, i), rb_ary_entry(rb_param_values, i));
 }
 
 void Init_linear_ext() {
