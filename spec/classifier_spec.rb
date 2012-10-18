@@ -7,7 +7,7 @@ describe LinearScience::Classifier do
 	end
 
 	describe '#new' do
-		it 'should be an instance of LinearScience::Classifier'
+		it 'should be an instance of LinearScience::Classifier' do
 			@classifier.should be_an_instance_of LinearScience::Classifier
 		end
 	end
