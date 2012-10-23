@@ -3,7 +3,7 @@ module LinearScience
 		class NotKernelType < Exception
 		end;
 
-		PARAMETERS = ["c_cost", "p_epsilon", "e_epsilon", "bias", "n_fold_cv"]
+		PARAMETERS = ["c_cost", "e_epsilon", "bias", "n_fold_cv"]
 
 		PARAMETERS.each do |param|
 			define_method(param + "=") do |value|
@@ -23,7 +23,6 @@ module LinearScience
 			# numeric
 			@kernel = nil
 			@c_cost = nil
-			@p_epsilon = nil
 			@e_epsilon = nil
 			@bias = nil
 			@n_fold_cv = nil
