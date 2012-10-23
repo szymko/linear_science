@@ -1,5 +1,5 @@
 module LinearScience
-	class Dataset
+	class Problem
 
 		class DimensionException < Exception
 		end
@@ -16,6 +16,14 @@ module LinearScience
 			check_vector(vector)
 			num_klass = Integer(klass)
 			@examples << [num_klass, vector]
+		end
+
+		def delete_examples(example_no = -1)
+			if example_no < 0 or example_no > @examples.length - 1
+				@examples = []
+			else
+				@examples = @examples[0 .. @examples.length - example_no - 1]
+			end
 		end
 
 		def max_dimension
