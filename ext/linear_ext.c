@@ -40,7 +40,7 @@ destroy_feature_node(struct feature_node ** feature_node_) {
 static void 
 set_param_weights(struct parameter * param, VALUE rb_weights) {
 	VALUE rb_weight_labels = rb_funcall(rb_weights, rb_intern("keys"), 0);
-	VALUE rb_weight_values = rb_funcall(rb_weights, rb_intern("vaules"), 0);
+	VALUE rb_weight_values = rb_funcall(rb_weights, rb_intern("values"), 0);
 	long i;
 
 	param->nr_weight = RHASH_SIZE(rb_weights);
@@ -124,13 +124,13 @@ read_problem(struct problem * c_problem, VALUE rb_problem, double c_bias) {
 static void 
 assign_param_value(struct parameter * param, VALUE rb_param_key, VALUE rb_param_value) {
 	if(!NIL_P(rb_param_value)) {
-		if(StringValueCStr(rb_param_key) == "kernel")
+		if(strcmp(StringValueCStr(rb_param_key), "kernel") == 0)
 			param->solver_type = NUM2INT(rb_param_value);
-		else if(StringValueCStr(rb_param_key) == "c_cost")
+		else if(strcmp(StringValueCStr(rb_param_key), "c_cost") == 0)
 			param->C = NUM2DBL(rb_param_value);
-		else if(StringValueCStr(rb_param_key) == "e_epsilon")
+		else if(strcmp(StringValueCStr(rb_param_key), "e_epsilon") == 0)
 			param->eps = NUM2DBL(rb_param_value);
-		else if(StringValueCStr(rb_param_key) == "weights")
+		else if(strcmp(StringValueCStr(rb_param_key), "weights") == 0)
 			set_param_weights(param, rb_param_value);
 	}
 }
@@ -218,7 +218,6 @@ rb_model_to_c_struct(VALUE rb_model) {
 	read_parameters(&(model_->param), rb_iv_get(rb_model, "@parameters"));
 	model_->nr_class = NUM2INT(rb_iv_get(rb_model, "@nr_class"));
 	model_->nr_feature = NUM2INT(rb_iv_get(rb_model, "@nr_feature"));
-		printf("Nr feature 1: %d\n", model_->nr_feature);
 	model_->bias = NUM2DBL(rb_iv_get(rb_model, "@bias"));
 	model_->label = MALLOC(int, model_->nr_class);
 	model_->w = MALLOC(double, w_size);
@@ -232,27 +231,6 @@ rb_model_to_c_struct(VALUE rb_model) {
 	return model_;
 }
 
-
-static VALUE
-c_classifier_predict(VALUE self, VALUE rb_example_vector) {
-	struct feature_node * c_example_vector;
-	struct model * c_model ;
-	VALUE rb_model;
-	VALUE rb_predicted_klass;
-
-	rb_model = rb_iv_get(self, "@model");
-	c_model = rb_model_to_c_struct(rb_model);
-	printf("Nr feature: %d\n",c_model->nr_feature);
-	rb_vector_to_feature_node(&c_example_vector, rb_example_vector, c_model->nr_feature, c_model->bias);
-
-	rb_predicted_klass = INT2NUM(predict(c_model, c_example_vector));
-
-	free_and_destroy_model(&c_model);
-	destroy_feature_node(&c_example_vector);
-
-	return rb_predicted_klass;
-}
-
 static VALUE
 c_classifier_train(VALUE self) {
 	VALUE rb_param = rb_funcall(rb_iv_get(self, "@parameters"), rb_intern("pack"), 0);
@@ -261,7 +239,6 @@ c_classifier_train(VALUE self) {
 
 	struct model * c_model;
 	struct parameter c_param;
-	struct parameter param;
 	struct problem c_problem;
 	double c_bias = NIL_P(rb_bias) ? -1.0 : NUM2DBL(rb_bias);
 
@@ -283,6 +260,54 @@ c_classifier_train(VALUE self) {
 	destroy_problem(&c_problem);
 
 	return rb_iv_get(self, "@model");
+}
+
+static VALUE
+c_classifier_predict(VALUE self, VALUE rb_example_vector) {
+	struct feature_node * c_example_vector;
+	struct model * c_model ;
+	VALUE rb_model;
+	VALUE rb_predicted_klass;
+
+	rb_model = rb_iv_get(self, "@model");
+	c_model = rb_model_to_c_struct(rb_model);
+	rb_vector_to_feature_node(&c_example_vector, rb_example_vector, c_model->nr_feature, c_model->bias);
+
+	rb_predicted_klass = INT2NUM(predict(c_model, c_example_vector));
+
+	free_and_destroy_model(&c_model);
+	destroy_feature_node(&c_example_vector);
+
+	return rb_predicted_klass;
+}
+
+static VALUE
+c_classifier_predict_probability(VALUE self, VALUE rb_example_vector) {
+	int i;
+	struct feature_node * c_example_vector;
+	struct model * c_model ;
+	double * c_probability;
+	VALUE rb_model;
+	VALUE rb_probability;
+
+	rb_model = rb_iv_get(self, "@model");
+	c_model = rb_model_to_c_struct(rb_model);
+	rb_vector_to_feature_node(&c_example_vector, rb_example_vector, c_model->nr_feature, c_model->bias);
+	rb_probability = rb_hash_new();
+	c_probability = MALLOC(double, c_model->nr_feature);
+
+	if(c_model->param.solver_type != L2R_LR)
+		rb_raise(rb_eRuntimeError, "Probability estimates are supported only for linear regression.");
+
+	predict_probability(c_model, c_example_vector, c_probability);
+
+	for(i = 0; i < c_model->nr_class; i++)
+		rb_hash_aset(rb_probability, INT2NUM(c_model->label[i]), rb_float_new(c_probability[i]));
+
+	free_and_destroy_model(&c_model);
+	destroy_feature_node(&c_example_vector);
+	free(c_probability);
+	return rb_probability;
 }
 
 static VALUE
@@ -313,4 +338,5 @@ void Init_linear_ext() {
 	cClassifier = rb_define_class_under(mLinearScience, "Classifier", rb_cObject);
 	rb_define_method(cClassifier, "train", c_classifier_train, 0);
 	rb_define_method(cClassifier, "predict", c_classifier_predict, 1);
+	rb_define_method(cClassifier, "predict_probability", c_classifier_predict_probability, 1);
 }
