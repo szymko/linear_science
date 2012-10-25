@@ -43,9 +43,14 @@ describe LinearScience::Classifier do
 			@classifier.predict(@classification_example).should be_a_kind_of(Numeric)
 		end
 
-		it 'should raise error if example is malformed' do
-			@malformed_example = { 1 => 1, 6 => 1 }
-			expect{ @classifier.predict(@malformed_example) }.to raise_error
+		it 'should not raise error if example dimension exceeds problem dimension' do
+			@oversized_example = { 1 => 1, 6 => 1 }
+			@classifier.predict(@oversized_example).should be_kind_of(Numeric)
+		end
+
+		it 'should raise error if example is ill-formed' do
+			@ill_formed_example = { "sir, im a number" => "somehow i doubt" }
+			expect{ @classifier.predict(@ill_formed_example) }.to raise_error
 		end
 	end
 
