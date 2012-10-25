@@ -10,7 +10,7 @@ module LinearScience
 			@examples = []
 		end
 
-		def add_example(klass,vector)
+		def add_example(klass, vector)
 			raise ArgumentError, 'Vector must be build in the form of {dimension => value} (respond to #each_pair).' unless vector.respond_to?(:each_pair)
 
 			check_vector(vector)
