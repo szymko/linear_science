@@ -70,3 +70,6 @@ tmp
 /ext/Makefile
 /ext/mkmf.log
 /ext/test.o
+/linear_science.sublime-project
+/linear_science.sublime-workspace
+/.rspec
