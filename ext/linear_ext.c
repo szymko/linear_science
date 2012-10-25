@@ -15,12 +15,6 @@ alloc_parameter(struct parameter * parameter_) {
 	return parameter_;
 }
 
-// static void 
-// free_parameter(struct parameter * parameter_) {
-// 	free(parameter_->weight_label);
-// 	free(parameter_->weight);
-// }
-
 static struct problem * 
 alloc_problem(struct problem * problem_) {
 	problem_ = MALLOC(struct problem, 1);
@@ -38,10 +32,10 @@ destroy_problem(struct problem * problem_) {
 	free(problem_->x);
 }
 
-// static void
-// free_model(struct model * model_) {
-
-// }
+static void
+destroy_feature_node(struct feature_node ** feature_node_) {
+	free(*feature_node_);
+}
 
 static void 
 set_param_weights(struct parameter * param, VALUE rb_weights) {
@@ -63,7 +57,34 @@ set_param_weights(struct parameter * param, VALUE rb_weights) {
 	}
 }
 
-static void //FIXME
+static void
+rb_vector_to_feature_node(struct feature_node ** node, VALUE rb_current_vector, double c_bias, int max_dim) {
+	int j;
+	int current_length;
+	int len_with_bias;
+	VALUE rb_example_labels;
+	VALUE rb_example_values;
+
+	current_length = RHASH_SIZE(rb_current_vector);
+	len_with_bias = c_bias > 0.0 ? current_length + 2 : current_length + 1;
+	rb_example_labels = rb_funcall(rb_current_vector, rb_intern("keys"), 0);
+	rb_example_values = rb_funcall(rb_current_vector, rb_intern("values"), 0);
+
+	(*node) = MALLOC(struct feature_node, len_with_bias);
+
+	for(j = 0; j < current_length; j++) {
+		(*node)[j].index = NUM2INT(rb_ary_entry(rb_example_labels, j));
+		(*node)[j].value = NUM2DBL(rb_ary_entry(rb_example_values,j));
+	}
+
+	if(c_bias > 0) {
+		(*node)[len_with_bias - 2].index = max_dim;
+		(*node)[len_with_bias - 2].value = c_bias;
+	}
+	(*node)[len_with_bias - 1].index = -1;
+}
+
+static void
 read_rb_examples(struct problem * c_problem, VALUE rb_example_ary, double c_bias) {
 	int i, j;
 	int current_length;
@@ -71,27 +92,16 @@ read_rb_examples(struct problem * c_problem, VALUE rb_example_ary, double c_bias
 	VALUE rb_example_labels;
 	VALUE rb_example_values;
 	VALUE rb_current_example;
+	VALUE rb_current_vector;
 
 	for(i = 0; i < c_problem->l; i++) {
 		rb_current_example = rb_ary_entry(rb_example_ary, i);
 		current_length = RHASH_SIZE(rb_ary_entry(rb_current_example, 1));
 		len_with_bias = c_bias > 0.0 ? current_length + 2 : current_length + 1;
-		rb_example_labels = rb_funcall(rb_ary_entry(rb_current_example, 1), rb_intern("keys"), 0);
-		rb_example_values = rb_funcall(rb_ary_entry(rb_current_example, 1), rb_intern("values"), 0);
+		rb_current_vector = rb_ary_entry(rb_current_example, 1);
 
-		c_problem->x[i] = MALLOC(struct feature_node, len_with_bias);
+		rb_vector_to_feature_node(&c_problem->x[i], rb_current_vector, c_bias, c_problem->n);
 		c_problem->y[i] = NUM2INT(rb_ary_entry(rb_current_example, 0));
-
-		for(j = 0; j < current_length; j++) {
-			c_problem->x[i][j].index = NUM2INT(rb_ary_entry(rb_example_labels, j));
-			c_problem->x[i][j].value = NUM2DBL(rb_ary_entry(rb_example_values,j));
-		}
-
-		if(c_bias > 0) {
-			c_problem->x[i][len_with_bias - 2].index = c_problem->n;
-			c_problem->x[i][len_with_bias - 2].value = c_bias;
-		}
-		c_problem->x[i][len_with_bias - 1].index = -1;
 	}
 }
 
@@ -169,14 +179,14 @@ params_to_hash(struct parameter param) {
 }
 
 static VALUE
-c_data_to_model(VALUE self, struct model * model_) {
+c_struct_to_rb_model(VALUE self, struct model * model_) {
 	int i;
 	int w_size;
 
 	rb_iv_set(self, "@parameters", params_to_hash(model_->param));
-	rb_iv_set(self, "@nr_class", INT2NUM(model_->nr_class));
+	rb_iv_set(self, "@nr_class",   INT2NUM(model_->nr_class));
 	rb_iv_set(self, "@nr_feature", INT2NUM(model_->nr_feature));
-	rb_iv_set(self, "@bias", rb_float_new(model_->bias));
+	rb_iv_set(self, "@bias",       rb_float_new(model_->bias));
 
 	VALUE rb_label = rb_ary_new();
 	VALUE rb_w = rb_ary_new();
@@ -195,18 +205,65 @@ c_data_to_model(VALUE self, struct model * model_) {
 	return self;
 }
 
+static struct model *
+rb_model_to_c_struct(VALUE rb_model) {
+	int i;
+	int w_size;
+	struct model * model_;
+
+	model_ = MALLOC(struct model, 1);
+
+	w_size = RARRAY_LEN(rb_iv_get(rb_model, "@w"));
+
+	read_parameters(&(model_->param), rb_iv_get(rb_model, "@parameters"));
+	model_->nr_class = NUM2INT(rb_iv_get(rb_model, "@nr_class"));
+	model_->nr_feature = NUM2INT(rb_iv_get(rb_model, "@nr_feature"));
+		printf("Nr feature 1: %d\n", model_->nr_feature);
+	model_->bias = NUM2DBL(rb_iv_get(rb_model, "@bias"));
+	model_->label = MALLOC(int, model_->nr_class);
+	model_->w = MALLOC(double, w_size);
+
+	for(i = 0; i < model_->nr_class; i++)
+		model_->label[i] = NUM2INT(rb_ary_entry(rb_iv_get(rb_model, "@label"), i));
+
+	for(i = 0; i < w_size; i++)
+		model_->w[i] = NUM2DBL(rb_ary_entry(rb_iv_get(rb_model, "@w"), i));
+
+	return model_;
+}
+
+
+static VALUE
+c_classifier_predict(VALUE self, VALUE rb_example_vector) {
+	struct feature_node * c_example_vector;
+	struct model * c_model ;
+	VALUE rb_model;
+	VALUE rb_predicted_klass;
+
+	rb_model = rb_iv_get(self, "@model");
+	c_model = rb_model_to_c_struct(rb_model);
+	printf("Nr feature: %d\n",c_model->nr_feature);
+	rb_vector_to_feature_node(&c_example_vector, rb_example_vector, c_model->nr_feature, c_model->bias);
+
+	rb_predicted_klass = INT2NUM(predict(c_model, c_example_vector));
+
+	free_and_destroy_model(&c_model);
+	destroy_feature_node(&c_example_vector);
+
+	return rb_predicted_klass;
+}
+
 static VALUE
 c_classifier_train(VALUE self) {
 	VALUE rb_param = rb_funcall(rb_iv_get(self, "@parameters"), rb_intern("pack"), 0);
 	VALUE rb_problem = rb_iv_get(self, "@problem");
 	VALUE rb_bias = rb_hash_aref(rb_param, rb_str_new2("bias"));
 
-	struct model* c_model;
+	struct model * c_model;
 	struct parameter c_param;
 	struct parameter param;
 	struct problem c_problem;
 	double c_bias = NIL_P(rb_bias) ? -1.0 : NUM2DBL(rb_bias);
-	const char* error_msg;
 
 	if(rb_problem == Qnil || rb_funcall(rb_iv_get(rb_problem, "@examples"), rb_intern("empty?"), 0) == Qtrue)
 		rb_raise(rb_eRuntimeError, "No training examples provided.");
@@ -214,13 +271,12 @@ c_classifier_train(VALUE self) {
 	set_default_parameters(&c_param);
 	read_parameters(&c_param, rb_param);
 	read_problem(&c_problem, rb_problem, c_bias);
-	error_msg = check_parameter(&c_problem, &c_param);
 
-	if(error_msg)
-		rb_raise(rb_eRuntimeError, error_msg);
-	
+	if(check_parameter(&c_problem, &c_param))
+		rb_raise(rb_eRuntimeError, "Extension: Wrong format of problem and/or parameters");
+
 	c_model = train(&c_problem, &c_param);
-	rb_iv_set(self, "@model", c_data_to_model(rb_iv_get(self, "@model"), c_model));
+	rb_iv_set(self, "@model", c_struct_to_rb_model(rb_iv_get(self, "@model"), c_model));
 
 	free_and_destroy_model(&c_model);
 	destroy_param(&c_param);
@@ -246,8 +302,15 @@ void Init_linear_ext() {
 
 	cModel = rb_define_class_under(mLinearScience, "Model", rb_cObject);
 	rb_define_method(cModel, "initialize", m_init, 0);
-
+	// define attr_getters
+	rb_define_attr(cModel, "parameters", 1, 0);
+	rb_define_attr(cModel, "nr_class",   1, 0);
+	rb_define_attr(cModel, "nr_feature", 1, 0);
+	rb_define_attr(cModel, "bias",       1, 0);
+	rb_define_attr(cModel, "label",      1, 0);
+	rb_define_attr(cModel, "w",          1, 0);
 
 	cClassifier = rb_define_class_under(mLinearScience, "Classifier", rb_cObject);
 	rb_define_method(cClassifier, "train", c_classifier_train, 0);
+	rb_define_method(cClassifier, "predict", c_classifier_predict, 1);
 }
